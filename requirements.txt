@@ -6,3 +6,4 @@ torchvision
 torchaudio
 pillow
 numpy
+gunicorn
