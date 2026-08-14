@@ -1,3 +1,4 @@
+
 import cv2
 import numpy as np
 import time
@@ -55,7 +56,8 @@ def search_object():
 # ============================================================
 
 def conveyor_on():
-    conveyor_motor.forward()
+    # Conveyor runs BACKWARD
+    conveyor_motor.backward()
 
 
 def conveyor_off():
@@ -72,6 +74,7 @@ if not cap.isOpened():
     print("Error: Could not open webcam.")
     exit()
 
+print("Floating Waste Robot Started")
 print("Press 'q' to quit.")
 
 
@@ -82,16 +85,31 @@ print("Press 'q' to quit.")
 last_command = ""
 last_time = 0
 
+
+# ============================================================
+# CONVEYOR SETTINGS
+# ============================================================
+
+# Conveyor runs for 16 seconds
+CONVEYOR_TIME = 16
+
+# Conveyor trigger line position
+# 0.80 = 80% down the camera frame
+CONVEYOR_LINE_POSITION = 0.80
+
+
 # Conveyor state
 conveyor_running = False
 conveyor_start_time = 0
 
-# Conveyor running time
-CONVEYOR_TIME = 7
 
-# Horizontal conveyor trigger line
-# 0.80 = 80% down from top of camera
-CONVEYOR_LINE_POSITION = 0.80
+# ------------------------------------------------------------
+# IMPORTANT:
+# Prevents the same object from repeatedly starting
+# the conveyor.
+# ------------------------------------------------------------
+
+conveyor_triggered = False
 
 
 # ============================================================
@@ -105,7 +123,9 @@ try:
         ret, frame = cap.read()
 
         if not ret:
+            print("Camera frame error.")
             break
+
 
         # ====================================================
         # REMOVE MIRROR EFFECT
@@ -124,15 +144,24 @@ try:
 
 
         # ====================================================
-        # CONVEYOR TIMER
+        # CONVEYOR TRIGGER LINE
+        # ====================================================
+
+        conveyor_line_y = int(
+            height * CONVEYOR_LINE_POSITION
+        )
+
+
+        # ====================================================
+        # CONVEYOR RUNNING
         # ====================================================
 
         if conveyor_running:
 
-            # Keep drive motors stopped
+            # Drive motors remain stopped
             stop_motors()
 
-            # Keep conveyor running
+            # Conveyor runs backward
             conveyor_on()
 
             elapsed_time = (
@@ -147,9 +176,11 @@ try:
                 elapsed_time
             )
 
+
+            # Display countdown
             cv2.putText(
                 frame,
-                f"CONVEYOR RUNNING: "
+                f"CONVEYOR BACKWARD: "
                 f"{max(0, remaining_time):.1f}s",
                 (30, 40),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -158,9 +189,10 @@ try:
                 2
             )
 
-            # -----------------------------------------------
-            # AFTER 7 SECONDS
-            # -----------------------------------------------
+
+            # ------------------------------------------------
+            # 16 SECONDS COMPLETED
+            # ------------------------------------------------
 
             if elapsed_time >= CONVEYOR_TIME:
 
@@ -169,12 +201,15 @@ try:
                 conveyor_running = False
 
                 print("CONVEYOR STOPPED")
+                print("Waiting for object to clear...")
+
 
             # Display
             cv2.imshow(
                 "Water Waste Robot",
                 frame
             )
+
 
             if 'mask' in locals():
 
@@ -183,16 +218,18 @@ try:
                     mask
                 )
 
+
             # Quit
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
-            # Do not perform normal movement
+
+            # Don't perform normal movement
             continue
 
 
         # ====================================================
-        # CAMERA CENTER LINE
+        # CENTER LINE
         # ====================================================
 
         cv2.line(
@@ -205,12 +242,8 @@ try:
 
 
         # ====================================================
-        # CONVEYOR TRIGGER LINE
+        # CONVEYOR HORIZONTAL TRIGGER LINE
         # ====================================================
-
-        conveyor_line_y = int(
-            height * CONVEYOR_LINE_POSITION
-        )
 
         cv2.line(
             frame,
@@ -219,6 +252,7 @@ try:
             (0, 0, 255),
             3
         )
+
 
         cv2.putText(
             frame,
@@ -242,7 +276,7 @@ try:
 
 
         # ====================================================
-        # YELLOW COLOR RANGE
+        # YELLOW RANGE
         # ====================================================
 
         lower_yellow = np.array(
@@ -255,7 +289,7 @@ try:
 
 
         # ====================================================
-        # CREATE MASK
+        # MASK
         # ====================================================
 
         mask = cv2.inRange(
@@ -274,11 +308,13 @@ try:
             np.uint8
         )
 
+
         mask = cv2.morphologyEx(
             mask,
             cv2.MORPH_OPEN,
             kernel
         )
+
 
         mask = cv2.morphologyEx(
             mask,
@@ -310,7 +346,7 @@ try:
             area = cv2.contourArea(cnt)
 
 
-            # Ignore small objects/noise
+            # Ignore small noise
             if area > 500:
 
                 object_found = True
@@ -357,7 +393,7 @@ try:
 
 
                 # =================================================
-                # DRAW OBJECT CENTER
+                # OBJECT CENTER
                 # =================================================
 
                 cv2.circle(
@@ -373,7 +409,7 @@ try:
 
 
                 # =================================================
-                # DRAW OBJECT BOTTOM POINT
+                # OBJECT BOTTOM POINT
                 # =================================================
 
                 cv2.circle(
@@ -389,7 +425,7 @@ try:
 
 
                 # =================================================
-                # SHOW OBJECT BOTTOM VALUE
+                # SHOW BOTTOM POSITION
                 # =================================================
 
                 cv2.putText(
@@ -426,35 +462,43 @@ try:
 
 
                 # =================================================
-                # CENTER TOLERANCE
+                # CONVEYOR TRIGGER
                 # =================================================
 
-                tolerance = 100
-
-
-                # =================================================
-                # FIRST CHECK:
-                # HAS OBJECT REACHED CONVEYOR LINE?
-                # =================================================
-
-                if object_bottom_y >= conveyor_line_y:
+                if (
+                    object_bottom_y >= conveyor_line_y
+                    and
+                    not conveyor_triggered
+                ):
 
                     # ---------------------------------------------
-                    # OBJECT HAS REACHED CONVEYOR
+                    # OBJECT REACHED CONVEYOR
                     # ---------------------------------------------
 
-                    command = "CONVEYOR START"
+                    command = (
+                        "CONVEYOR BACKWARD - 16 SEC"
+                    )
 
-                    # Stop robot
+
+                    # Stop drive motors
                     stop_motors()
 
-                    # Start conveyor
+
+                    # Start conveyor backward
                     conveyor_on()
 
-                    # Start 7-second timer
+
+                    # Start timer
                     conveyor_running = True
 
-                    conveyor_start_time = time.time()
+                    conveyor_start_time = (
+                        time.time()
+                    )
+
+
+                    # Lock this object
+                    conveyor_triggered = True
+
 
                     print(
                         "OBJECT REACHED CONVEYOR LINE"
@@ -465,7 +509,11 @@ try:
                     )
 
                     print(
-                        "CONVEYOR STARTED FOR 7 SECONDS"
+                        "CONVEYOR RUNNING BACKWARD"
+                    )
+
+                    print(
+                        "CONVEYOR WILL RUN FOR 16 SECONDS"
                     )
 
 
@@ -476,10 +524,25 @@ try:
                 else:
 
                     # ---------------------------------------------
+                    # OBJECT HAS MOVED AWAY
+                    #
+                    # Unlock conveyor for next object
+                    # ---------------------------------------------
+
+                    if (
+                        object_bottom_y
+                        <
+                        conveyor_line_y - 30
+                    ):
+
+                        conveyor_triggered = False
+
+
+                    # ---------------------------------------------
                     # OBJECT LEFT
                     # ---------------------------------------------
 
-                    if error < -tolerance:
+                    if error < -100:
 
                         command = "MOVE LEFT"
 
@@ -492,7 +555,7 @@ try:
                     # OBJECT RIGHT
                     # ---------------------------------------------
 
-                    elif error > tolerance:
+                    elif error > 100:
 
                         command = "MOVE RIGHT"
 
@@ -547,7 +610,7 @@ try:
                     command,
                     (50, 140),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
+                    0.9,
                     (0, 255, 0),
                     3
                 )
@@ -564,9 +627,23 @@ try:
 
             command = "SEARCH"
 
+
+            # Search for object
             search_object()
 
+
+            # Conveyor OFF
             conveyor_off()
+
+
+            # -----------------------------------------------
+            # If object disappeared, unlock conveyor.
+            #
+            # This prevents an old object from keeping
+            # the conveyor locked forever.
+            # -----------------------------------------------
+
+            conveyor_triggered = False
 
 
             current_time = time.time()
